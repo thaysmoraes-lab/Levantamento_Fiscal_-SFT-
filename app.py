@@ -396,7 +396,7 @@ st.markdown(
             {renderizar_logo_totvs()}
         </div>
         <h1>Configurador de Tributos</h1>
-        <p>Gerador de Planilha de Apoio — Cruzamento SFT × CBENEF × NCM</p>
+        <p>Gerador de Planilha de Apoio levantamento fiscal — Cruzamento SFT × CBENEF × NCM</p>
     </div>
     ''',
     unsafe_allow_html=True
@@ -419,9 +419,9 @@ if st.session_state.passo == 1:
     )
 
     sft_file = st.file_uploader(
-        "Selecione o arquivo SFT (.xlsx)",
+        "SFT (extraída de genericos)",
         type=['xlsx', 'xls'],
-        help="Arquivo Excel exportado da tabela SFT do Protheus.",
+        help="Arquivo Excel exportado da tabela SFT do Protheus (extração de genéricos).",
     )
 
     if sft_file is not None:
@@ -590,12 +590,39 @@ elif st.session_state.passo == 3:
         reset_app()
 
 
-# ===== FOOTER =====
+# ===== DISCLAIMER FISCAL =====
 st.markdown(
-    '<div style="text-align: center; color: #717171; font-size: 0.8rem; '
-    'padding: 2rem 0 1rem 0; margin-top: 3rem; border-top: 1px solid #E0E0E0;">'
-    'Desenvolvido para automação fiscal — Protheus TOTVS · '
-    'Cruzamento inteligente CBENEF × NCM × Perfil da Empresa'
-    '</div>',
+    f'''
+    <div style="
+        background: #FFF8E1;
+        border-left: 5px solid #F59E0B;
+        border-radius: 10px;
+        padding: 1.2rem 1.5rem;
+        margin: 3rem 0 1rem 0;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    ">
+        <div style="display: flex; align-items: flex-start; gap: 0.8rem;">
+            <div style="font-size: 1.5rem; line-height: 1;">⚠️</div>
+            <div style="flex: 1;">
+                <div style="font-weight: 700; color: #B45309; font-size: 1rem; margin-bottom: 0.4rem;">
+                    Aviso importante
+                </div>
+                <div style="color: #2D2D2D; font-size: 0.9rem; line-height: 1.6;">
+                    Este levantamento é apenas para <strong>apoio</strong> ao processo de
+                    cadastro no Configurador de Tributos. As regras geradas <strong>devem ser
+                    revisadas por profissional fiscal qualificado</strong> antes da implementação
+                    em ambiente produtivo, para garantir a <strong>conformidade fiscal</strong>
+                    com a legislação vigente e as particularidades de cada operação da empresa.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div style="text-align: center; color: #717171; font-size: 0.8rem;
+                padding: 1rem 0; margin-top: 1rem; border-top: 1px solid #E0E0E0;">
+        Desenvolvido para automação fiscal — Protheus TOTVS ·
+        Cruzamento inteligente CBENEF × NCM × Perfil da Empresa
+    </div>
+    ''',
     unsafe_allow_html=True
 )
