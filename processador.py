@@ -807,6 +807,155 @@ def _ncm_match_chapter(ncm, prefixos):
     return any(ncm.startswith(p) for p in prefixos)
 
 
+def build_mapeamento_cst_cfop(df, ret_tables_list=None,
+                               pg_tables=None, cd_tables=None, cb_tables=None,
+                               ipi_tables=None):
+    """
+    Constrói o mapeamento CST × CFOP por tributo para a aba MAPEAMENTO CST × CFOP.
+
+    Formato de saída (lista de tuplas):
+      (TRIBUTO, CST, CFOPs concatenados, QTD LINHAS)
+
+    Para tributos sem CST (ISS, retenções), CST = '-'.
+    CFOPs são concatenados com vírgula, ordenados.
+    """
+    rows = []
+
+    # === ICMS ===
+    d_icms = df[df['IMPOSTO'] == 'ICMS'].copy()
+    if len(d_icms) > 0:
+        d_icms['_CST'] = d_icms['SIT_TRIB'].astype(int).astype(str).str.zfill(2)
+        d_icms['_CFOP'] = d_icms['CFOP'].astype(str)
+        agrupado = (
+            d_icms.groupby('_CST')
+            .agg(
+                CFOPs=('_CFOP', lambda s: ', '.join(sorted(set(str(x) for x in s if x and str(x) != 'nan')))),
+                qtd=('_CFOP', 'count')
+            )
+            .reset_index()
+            .sort_values('_CST')
+        )
+        for _, r in agrupado.iterrows():
+            rows.append(('ICMS', r['_CST'], r['CFOPs'], int(r['qtd'])))
+
+    # === ISS ===
+    d_iss = df[df['IMPOSTO'] == 'ISS'].copy()
+    if len(d_iss) > 0:
+        cfops = sorted(set(str(x) for x in d_iss['CFOP'] if x and str(x) != 'nan'))
+        rows.append(('ISS', '-', ', '.join(cfops), int(len(d_iss))))
+
+    # === PIS/COFINS === (usa CST_PIS como chave principal)
+    if 'CST_PIS' in df.columns:
+        d_pc = df[df['CST_PIS'].notna()].copy()
+        if len(d_pc) > 0:
+            d_pc['_CST'] = d_pc['CST_PIS'].astype(int).astype(str).str.zfill(2)
+            d_pc['_CFOP'] = d_pc['CFOP'].astype(str)
+            agrupado = (
+                d_pc.groupby('_CST')
+                .agg(
+                    CFOPs=('_CFOP', lambda s: ', '.join(sorted(set(str(x) for x in s if x and str(x) != 'nan')))),
+                    qtd=('_CFOP', 'count')
+                )
+                .reset_index()
+                .sort_values('_CST')
+            )
+            for _, r in agrupado.iterrows():
+                # se CFOPs ficar muito longo (>5 únicos), substitui por "(vários)" + qtd
+                cfops_str = r['CFOPs']
+                n_cfops = cfops_str.count(',') + 1 if cfops_str else 0
+                if n_cfops > 8:
+                    cfops_str = f"({n_cfops} CFOPs distintos)"
+                rows.append(('PIS/COFINS', r['_CST'], cfops_str, int(r['qtd'])))
+
+    # === Retenções (PR/CR/SR/IR/NR/TR) ===
+    if ret_tables_list:
+        for rt in ret_tables_list:
+            nome = rt.get('nome', '')
+            df_ret = rt.get('df')
+            if df_ret is not None and len(df_ret) > 0:
+                cfops = sorted(set(str(x) for x in df_ret['CFOP'] if x and str(x) != 'nan'))
+                cfops_str = ', '.join(cfops)
+                if len(cfops) > 8:
+                    cfops_str = f"({len(cfops)} CFOPs distintos)"
+                rows.append((nome, '-', cfops_str, int(len(df_ret))))
+
+    # === PROTEGE GO ===
+    if pg_tables and len(pg_tables.get('df', [])) > 0:
+        df_pg = pg_tables['df']
+        d_pg = df_pg.copy()
+        d_pg['_CST'] = d_pg['SIT_TRIB'].astype(int).astype(str).str.zfill(2)
+        d_pg['_CFOP'] = d_pg['CFOP'].astype(str)
+        agrupado = (
+            d_pg.groupby('_CST')
+            .agg(
+                CFOPs=('_CFOP', lambda s: ', '.join(sorted(set(str(x) for x in s if x and str(x) != 'nan')))),
+                qtd=('_CFOP', 'count')
+            )
+            .reset_index()
+            .sort_values('_CST')
+        )
+        for _, r in agrupado.iterrows():
+            cfops_str = r['CFOPs']
+            n_cfops = cfops_str.count(',') + 1 if cfops_str else 0
+            if n_cfops > 8:
+                cfops_str = f"({n_cfops} CFOPs distintos)"
+            rows.append(('PROTEGE GO', r['_CST'], cfops_str, int(r['qtd'])))
+
+    # === ICMS Complementar DIFAL ===
+    if cd_tables and len(cd_tables.get('df', [])) > 0:
+        df_cd = cd_tables['df']
+        cfops = sorted(set(str(x) for x in df_cd['CFOP'] if x and str(x) != 'nan'))
+        cfops_str = ', '.join(cfops)
+        if len(cfops) > 8:
+            cfops_str = f"({len(cfops)} CFOPs distintos)"
+        rows.append(('ICMS Compl. DIFAL', '-', cfops_str, int(len(df_cd))))
+
+    # === ICMS Complementar Base Destino ===
+    if cb_tables and len(cb_tables.get('df', [])) > 0:
+        df_cb = cb_tables['df']
+        cfops = sorted(set(str(x) for x in df_cb['CFOP'] if x and str(x) != 'nan'))
+        cfops_str = ', '.join(cfops)
+        if len(cfops) > 8:
+            cfops_str = f"({len(cfops)} CFOPs distintos)"
+        rows.append(('ICMS Compl. Base Destino', '-', cfops_str, int(len(df_cb))))
+
+    # === IPI === (usa SIT_TRIB_IPI como CST)
+    if ipi_tables and len(ipi_tables.get('df', [])) > 0:
+        df_ipi = ipi_tables['df'].copy()
+        # Tenta encontrar coluna de CST IPI
+        cst_col = None
+        for c in ['SIT_TRIB_IPI', 'CST_IPI', 'Sit.Trib.IPI', 'SIT_TRIB']:
+            if c in df_ipi.columns:
+                cst_col = c
+                break
+        if cst_col:
+            df_ipi['_CST'] = df_ipi[cst_col].astype(str).str.replace('.0', '', regex=False).str.zfill(2)
+            df_ipi['_CFOP'] = df_ipi['CFOP'].astype(str)
+            agrupado = (
+                df_ipi.groupby('_CST')
+                .agg(
+                    CFOPs=('_CFOP', lambda s: ', '.join(sorted(set(str(x) for x in s if x and str(x) != 'nan')))),
+                    qtd=('_CFOP', 'count')
+                )
+                .reset_index()
+                .sort_values('_CST')
+            )
+            for _, r in agrupado.iterrows():
+                cfops_str = r['CFOPs']
+                n_cfops = cfops_str.count(',') + 1 if cfops_str else 0
+                if n_cfops > 8:
+                    cfops_str = f"({n_cfops} CFOPs distintos)"
+                rows.append(('IPI', r['_CST'], cfops_str, int(r['qtd'])))
+        else:
+            cfops = sorted(set(str(x) for x in df_ipi['CFOP'] if x and str(x) != 'nan'))
+            cfops_str = ', '.join(cfops)
+            if len(cfops) > 8:
+                cfops_str = f"({len(cfops)} CFOPs distintos)"
+            rows.append(('IPI', '-', cfops_str, int(len(df_ipi))))
+
+    return rows
+
+
 def build_valor_declaratorio_table(df, cbenef_tables, ncm_map=None,
                                     classificacao_por_estado=None,
                                     perfil_empresa=None):
@@ -2083,12 +2232,17 @@ def build_ipi_tables(df):
 
 def write_excel(icms_tables, pc_tables, iss_tables, ret_tables_list,
                 pg_tables, cd_tables, cb_tables, ipi_tables,
-                modelo_file, output_file, valor_declaratorio_df=None):
+                modelo_file, output_file, valor_declaratorio_df=None,
+                df_global=None):
     """
     Escreve a planilha de saída em layout CONSOLIDADO (10 abas).
 
     Cada aba inclui uma coluna 'TRIBUTO' que identifica de qual imposto
     cada linha pertence, com cor de fundo coerente.
+
+    Args:
+      df_global: DataFrame consolidado da SFT (ICMS+ISS) — usado para gerar
+                 a aba MAPEAMENTO CST × CFOP. Se None, aba é omitida.
     """
 
     wb = load_workbook(modelo_file)
@@ -2517,6 +2671,23 @@ def write_excel(icms_tables, pc_tables, iss_tables, ret_tables_list,
         resumo_rows,
         [28, 12, 16, 90])
 
+    # 9b) MAPEAMENTO CST × CFOP — detalhamento por tributo
+    if df_global is not None:
+        mapeamento_rows = build_mapeamento_cst_cfop(
+            df_global,
+            ret_tables_list=ret_tables_list,
+            pg_tables=pg_tables,
+            cd_tables=cd_tables,
+            cb_tables=cb_tables,
+            ipi_tables=ipi_tables,
+        )
+        if mapeamento_rows:
+            ws = get_or_create_sheet(wb, 'MAPEAMENTO CST × CFOP')
+            write_consolidated(ws,
+                ['TRIBUTO', 'CST', 'CFOPs', 'QTD LINHAS SFT'],
+                mapeamento_rows,
+                [28, 8, 80, 16])
+
     # 10) REGRA VALOR DECLARATÓRIO (CBENEF cruzado com SFT + NCM + Aplicabilidade)
     ws = get_or_create_sheet(wb, 'REGRA VALOR DECLARATÓRIO')
     vd_rows = []
@@ -2573,6 +2744,7 @@ def write_excel(icms_tables, pc_tables, iss_tables, ret_tables_list,
     # Ordenar abas
     desired_order = [
         'RESUMO',
+        'MAPEAMENTO CST × CFOP',
         'REGRA DE CALCULO',
         'REGRA VALOR DECLARATÓRIO',
         'PERFIL ORIGEM DESTINO', 'PERFIL PARTICIPANTE',
@@ -2714,7 +2886,8 @@ def gerar_planilha(sft_path, perfil_empresa=None, sft_sheet=None,
         write_excel(icms_tables, pc_tables, iss_tables, ret_tables_list,
                     pg_tables, cd_tables, cb_tables, ipi_tables,
                     MODELO_FILE, output_path,
-                    valor_declaratorio_df=valor_declaratorio_df)
+                    valor_declaratorio_df=valor_declaratorio_df,
+                    df_global=df)
         log(f"=== CONCLUÍDO === Arquivo: {output_path}")
         return None
     else:
@@ -2727,7 +2900,8 @@ def gerar_planilha(sft_path, perfil_empresa=None, sft_sheet=None,
             write_excel(icms_tables, pc_tables, iss_tables, ret_tables_list,
                         pg_tables, cd_tables, cb_tables, ipi_tables,
                         MODELO_FILE, tmp_path,
-                        valor_declaratorio_df=valor_declaratorio_df)
+                        valor_declaratorio_df=valor_declaratorio_df,
+                        df_global=df)
             with open(tmp_path, 'rb') as f:
                 data = f.read()
             log(f"=== CONCLUÍDO === {len(data):,} bytes gerados")
